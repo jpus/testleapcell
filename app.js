@@ -1,80 +1,142 @@
-const http = require('http');
+const express = require("express");
+const app = express();
+const net = require('net');
+const os = require('os');
+const process = require('process');
+const fs = require("fs");
+const path = require("path");
+const { promisify } = require('util');
+const exec = promisify(require('child_process').exec);
 const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-// 从环境变量加载敏感数据
 const PORT = process.env.PORT || 8080;
-const NEZHA_SERVER = process.env.NEZHA_SERVER || 'agent.oklala.nyc.mn:443';
-const NEZHA_KEY = process.env.NEZHA_KEY || '6727pOscbDZw0BulF6';
 
-// 定义路径
-const appDir = '/app'; // Leapcell 应用目录
-const tmpDir = '/tmp'; // 可写入的临时目录
-const originalSwithPath = path.join(appDir, 'swith');
-const swithPath = path.join(tmpDir, 'swith');
-
-// 创建 HTTP 服务器
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Server is running');
+app.get("/", (req, res) => {
+  res.send("Hello world!");
 });
 
-// 执行启动脚本逻辑
-const startScript = () => {
+app.get("/status", (req, res) => {
   try {
-    // 1. 检查原始文件是否存在
-    console.log(`检查原始文件: ${originalSwithPath}`);
-    if (!fs.existsSync(originalSwithPath)) {
-      throw new Error(`原始文件不存在: ${originalSwithPath}`);
-    }
+    const processInfo = {
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      pid: process.pid,
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage(),
+      cpuUsage: process.cpuUsage(),
+      env: Object.keys(process.env).length
+    };
 
-    // 2. 复制文件到 /tmp 目录
-    console.log(`复制文件到: ${swithPath}`);
-    fs.copyFileSync(originalSwithPath, swithPath);
-    console.log('文件复制完成');
+    const systemInfo = {
+      hostname: os.hostname(),
+      type: os.type(),
+      release: os.release(),
+      loadavg: os.loadavg(),
+      totalmem: os.totalmem(),
+      freemem: os.freemem(),
+      cpus: os.cpus().length,
+      networkInterfaces: os.networkInterfaces()
+    };
 
-    // 3. 赋予 swith 可执行权限
-    console.log(`赋予执行权限: ${swithPath}`);
-    execSync(`chmod +x "${swithPath}"`);
-    console.log('权限设置完成');
+    const children = [];
 
-    // 4. 验证文件可执行
-    fs.accessSync(swithPath, fs.constants.X_OK);
-    console.log('文件可执行验证通过');
+    const output = `
+系统进程状态（纯 Node.js 实现）：
+=====================================
+当前 Node.js 进程信息：
+- PID: ${processInfo.pid}
+- Node.js 版本: ${processInfo.nodeVersion}
+- 运行平台: ${processInfo.platform} (${processInfo.arch})
+- 进程运行时间: ${Math.floor(processInfo.uptime)} 秒
+- 内存使用:
+  • RSS: ${(processInfo.memoryUsage.rss / 1024 / 1024).toFixed(2)} MB
+  • 堆总计: ${(processInfo.memoryUsage.heapTotal / 1024 / 1024).toFixed(2)} MB
+  • 堆使用: ${(processInfo.memoryUsage.heapUsed / 1024 / 1024).toFixed(2)} MB
+  • 外部: ${(processInfo.memoryUsage.external / 1024 / 1024).toFixed(2)} MB
+  • 数组缓冲区: ${(processInfo.memoryUsage.arrayBuffers / 1024 / 1024).toFixed(2)} MB
+- CPU 使用: ${(processInfo.cpuUsage.user / 1000000).toFixed(2)} 秒 (用户) / ${(processInfo.cpuUsage.system / 1000000).toFixed(2)} 秒 (系统)
+- 环境变量数量: ${processInfo.env}
 
-    // 5. 在后台启动 swith
-    console.log(`启动 swith，连接服务器: ${NEZHA_SERVER}`);
-    execSync(`nohup "${swithPath}" -s "${NEZHA_SERVER}" -p "${NEZHA_KEY}" --tls > /dev/null 2>&1 &`);
-    console.log('swith 已启动');
+系统信息：
+- 主机名: ${systemInfo.hostname}
+- 系统类型: ${systemInfo.type} ${systemInfo.release}
+- 系统负载 (1, 5, 15分钟): ${systemInfo.loadavg.map(l => l.toFixed(2)).join(', ')}
+- 内存: ${(systemInfo.freemem / 1024 / 1024 / 1024).toFixed(2)} GB 可用 / ${(systemInfo.totalmem / 1024 / 1024 / 1024).toFixed(2)} GB 总计 (${((systemInfo.freemem / systemInfo.totalmem) * 100).toFixed(1)}% 可用)
+- CPU 核心数: ${systemInfo.cpus}
+- 系统运行时间: ${Math.floor(os.uptime() / 3600)} 小时 ${Math.floor((os.uptime() % 3600) / 60)} 分钟
 
-  } catch (error) {
-    console.error('startScript 错误:', error.message, error.stack);
-    process.exit(1); // 失败时退出
+网络接口：
+${Object.entries(systemInfo.networkInterfaces).map(([name, interfaces]) => {
+  return `  ${name}:\n${interfaces.map(intf => `    • ${intf.address} (${intf.family}) ${intf.internal ? '内网' : '外网'}`).join('\n')}`;
+}).join('\n')}
+
+=====================================`;
+    
+    res.type("html").send("<pre>" + output + "</pre>");
+  } catch (err) {
+    res.status(500).type("html").send("<pre>获取进程状态失败：\n" + err.message + "</pre>");
   }
-};
-
-// 启动 HTTP 服务器并运行脚本
-server.listen(PORT, () => {
-  console.log(`服务器运行在端口 ${PORT}`);
-  console.log(`当前工作目录: ${process.cwd()}`);
-  console.log(`应用目录: ${appDir}`);
-  startScript(); // 服务器启动后运行脚本
 });
 
-// 处理进程终止以清理
-process.on('SIGINT', () => {
-  console.log('服务器正在关闭');
-  server.close(() => {
-    // 可选：清理临时文件
-    try {
-      if (fs.existsSync(swithPath)) {
-        fs.unlinkSync(swithPath);
-        console.log('临时文件已清理');
+app.get("/killall", (req, res) => {
+  try {
+    const username = os.userInfo().username;
+    console.warn(`警告：尝试终止用户 ${username} 的所有进程`);
+
+    const currentPid = process.pid;
+    const parentPid = process.ppid;
+    
+    console.warn(`当前进程 PID: ${currentPid}, 父进程 PID: ${parentPid}`);
+
+    const output = `
+纯 Node.js 终止进程功能有限制：
+=====================================
+当前用户: ${username}
+当前进程 PID: ${currentPid}
+父进程 PID: ${parentPid}
+
+由于安全限制，纯 Node.js 无法终止：
+1. 其他用户的进程
+2. 系统进程
+3. 其他独立进程
+
+已执行的操作：
+1. 已发送退出信号给当前 Node.js 进程
+2. 正在清理资源...
+
+警告：服务器将在 3 秒后关闭！
+=====================================`;
+    
+    res.type("html").send("<pre>" + output + "</pre>");
+
+    setTimeout(() => {
+      console.warn(`用户 ${username} 的 Node.js 进程 ${currentPid} 正在退出`);
+
+      if (typeof cleanup === 'function') {
+        cleanup();
       }
-    } catch (e) {
-      console.warn('清理临时文件时出错:', e.message);
-    }
-    process.exit(0);
-  });
+
+      if (server && typeof server.close === 'function') {
+        server.close(() => {
+          console.log('HTTP 服务器已关闭');
+          process.exit(0);
+        });
+
+        setTimeout(() => {
+          console.warn('强制退出进程');
+          process.exit(0);
+        }, 5000);
+      } else {
+        process.exit(0);
+      }
+    }, 3000);
+    
+  } catch (err) {
+    console.error(`终止进程失败: ${err.message}`);
+    res.status(500).send(`终止进程失败: ${err.message}`);
+  }
 });
+
+    const server = app.listen(PORT, () => {
+        console.log(`http server is running on port:${PORT}!`);
+    });
