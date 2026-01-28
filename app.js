@@ -8,7 +8,7 @@ const NEZHA_SERVER = process.env.NEZHA_SERVER || 'agent.oklala.nyc.mn:443';
 const NEZHA_KEY = process.env.NEZHA_KEY || '6727pOscbDZw0BulF6';
 
 // 构建 swith 的绝对路径
-const swithPath = path.join(__dirname, 'main', 'swith');
+const swithPath = path.join(__dirname, 'swith');
 
 // 创建 HTTP 服务器
 const server = http.createServer((req, res) => {
